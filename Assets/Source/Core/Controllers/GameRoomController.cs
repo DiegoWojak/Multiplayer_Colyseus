@@ -10,6 +10,7 @@ using Assets.Source.Core.Views;
 using Colyseus.Schema;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
+using System.Collections;
 
 namespace Assets.Source.Core.Controllers
 {
@@ -485,12 +486,182 @@ namespace Assets.Source.Core.Controllers
             _currentNetworkedUser = null;
         }
 
+        /// <summary>
+        ///     The callback for the event when a <see cref="ColyseusNetworkedEntity" /> is added to a room.
+        /// </summary>
+        /// <param name="entity">The entity that was just added.</param>
+        /// <param name="key">The entity's key</param>
         private async void OnEntityAdd(string key, ColyseusNetworkedEntity entity)
         {
+            onAddNetworkEntity?.Invoke(entity);
+        }
 
+        /// <summary>
+        ///     The callback for the event when a <see cref="ColyseusNetworkedEntity" /> is removed from a room.
+        /// </summary>
+        /// <param name="entity">The entity that was just removed.</param>
+        /// <param name="key">The entity's key</param>
+        private void OnEntityRemoved(string key, ColyseusNetworkedEntity entity)
+        {
+            if (_entities.ContainsKey(entity.id))
+            {
+                _entities.Remove(entity.id);
+            }
+
+            ColyseusNetworkedEntityView view = null;
+
+            if (_entityViews.ContainsKey(entity.id))
+            {
+                view = _entityViews[entity.id];
+                _entityViews.Remove(entity.id);
+            }
+
+            onRemoveNetworkEntity?.Invoke(entity, view);
+        }
+
+        /// <summary>
+        ///     Callback for when a <see cref="ColyseusNetworkedUser" /> is added to a room.
+        /// </summary>
+        /// <param name="user">The user object</param>
+        /// <param name="key">The user key</param>
+        private void OnUserAdd(string key, ColyseusNetworkedUser user)
+        {
+            // Add "player" to map of players
+            _users.Add(key, user);
+
+            // On entity update...
+            /*user.OnChange += changes =>
+            {
+                
+            };*/
+        }
+
+        // <summary>
+        ///     Callback for when a user is removed from a room.
+        /// </summary>
+        /// <param name="user">The removed user.</param>
+        /// <param name="key">The user key.</param>
+        private void OnUserRemove(string key, ColyseusNetworkedUser user)
+        {
+
+            _users.Remove(key);
+        }
+
+        /// <summary>
+        ///     Callback for when the room's connection closes.
+        /// </summary>
+        /// <param name="closeCode">Code reason for the connection close.</param>
+        private static void Room_OnClose(int closeCode)
+        {
             
         }
 
+        /// <summary>
+        ///     Callback for when the room get an error.
+        /// </summary>
+        /// <param name="errorMsg">The error message.</param>
+        private static void Room_OnError(string errorMsg)
+        {
+            
+        }
+
+        private static void OnStateChangeHandler(ColyseusRoomState state, bool isFirstState)
+        {
+            //LSLog.LogImportant("State has been updated!");
+            onRoomStateChanged?.Invoke(state.attributes);
+        }
+
+        /// <summary>
+        ///     Sends "ping" message to current room to help measure latency to the server.
+        /// </summary>
+        /// <param name="roomToPing">The <see cref="ColyseusRoom{T}" /> to ping.</param>
+        private IEnumerator RunPingThread(object roomToPing)
+        {
+            ColyseusRoom<ColyseusRoomState> currentRoom = (ColyseusRoom<ColyseusRoomState>)roomToPing;
+
+            const float pingInterval = 0.5f; // seconds
+            const float pingTimeout = 15f; //seconds
+
+            int timeoutMilliseconds = Mathf.FloorToInt(pingTimeout * 1000);
+            DateTime pingStart;
+            while (currentRoom != null)
+            {
+                _waitForPong = true;
+                pingStart = DateTime.Now;
+                _lastPing = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                _ = currentRoom.Send("ping");
+                while (currentRoom != null && _waitForPong &&
+                       DateTime.Now.Subtract(pingStart).TotalSeconds < timeoutMilliseconds)
+                {
+                    yield return new WaitForSeconds(0.02f);//Thread.Sleep(200));
+                }
+
+                if (_waitForPong)
+                {
+                    Debug.Log("Ping Timed out");
+                }
+                yield return new WaitForSeconds(pingInterval);
+            }
+        }
+
+        /// <summary>
+        ///     Increments the known <see cref="_serverTime" /> by <see cref="Time.fixedDeltaTime" />
+        ///     converted into milliseconds.
+        /// </summary>
+        public void IncrementServerTime()
+        {
+            _serverTime += Time.fixedDeltaTime * 1000;
+        }
+
+        private void StopPing()
+        {
+            if (_pingThread != null)
+            {
+                MyMultiplayerManager.Instance.StopCoroutine(_pingThread);
+                _pingThread = null;
+            }
+        }
+
+        public async void CleanUp()
+        {
+            StopPing();
+
+            List<Task> leaveRoomTasks = new List<Task>();
+
+            foreach (IColyseusRoom roomEl in rooms)
+            {
+                leaveRoomTasks.Add(roomEl.Leave(false));
+            }
+
+            if (_room != null)
+            {
+                leaveRoomTasks.Add(_room.Leave(false));
+            }
+
+            await Task.WhenAll(leaveRoomTasks.ToArray());
+
+            ClearCollectionsAndUser();
+        }
+
+        public void ClearCollectionsAndUser()
+        {
+            if (_entities != null)
+                _entities.Clear();
+
+            if (_entityViews != null)
+                _entityViews.Clear();
+
+            if (_users != null)
+                _users.Clear();
+
+            if (_creationCallbacks != null)
+                _creationCallbacks.Clear();
+
+            if (roomOptionsDictionary != null)
+                roomOptionsDictionary.Clear();
+
+            _currentNetworkedUser = null;
+        }
         #endregion
     }
 }

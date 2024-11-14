@@ -3,6 +3,9 @@ using Colyseus;
 
 using Assets.Source.Core.Components.Lobby;
 using Assets.Source.Core.Controllers;
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
 public class MyMultiplayerManager : ColyseusManager<MyMultiplayerManager>
 {
     public delegate void OnRoomsReceived(GameRoomsAvailables[] rooms);
@@ -16,17 +19,26 @@ public class MyMultiplayerManager : ColyseusManager<MyMultiplayerManager>
     /// </summary>
     public ColyseusNetworkedEntity CurrentNetworkedEntity;
 
-
-
-
     [SerializeField]
     string p_MessageToTheServer;
 
-    ColyseusRoom<dynamic> _room;
+    ColyseusRoom<ColyseusRoomState> _room;
+
+
     protected override void Awake()
     {
         base.Awake();
         InitializeClient();
+    }
+
+    private void OnEnable()
+    {
+        
+    }
+
+    private void OnDisable()
+    {
+        
     }
 
     public override void InitializeClient()
@@ -37,29 +49,70 @@ public class MyMultiplayerManager : ColyseusManager<MyMultiplayerManager>
         JoinOCreateRoom();
     }
 
+    ColyseusNetworkedUser _current;
+
     public async void JoinOCreateRoom() {
-        _room = await client.JoinOrCreate("my_room");
+        Dictionary<string, object> options = new Dictionary<string, object>();
+        options.Add("roomId", 123);
+        options.Add("logic", "starBossCoop");
+        //options.Add(option.Key, option.Value);
+
+
+        _room = await client.JoinOrCreate<ColyseusRoomState>("Main_Room", options);
 
         _room.OnMessage<string>("welcomeMessage", (_type) =>
         {
             Debug.Log("Received message from server: " + _type);
         });
 
+        _room.OnMessage<OnJoinMessage>("onJoin", (_type) => {
+            _current = _type.newNetworkedUser;
+            Debug.Log("Received On Join message from server: "+ _type.newNetworkedUser.sessionId + " - " + _type.newNetworkedUser.connected);
+        });
+
+
+
+        _room.OnJoin += _room_OnJoin;
         _room.OnStateChange += _room_OnStateChange;
     }
 
-    private void _room_OnStateChange(dynamic state, bool isFirstState)
+
+    private void _room_OnStateChange(ColyseusRoomState state, bool isFirstState)
     {
-        throw new System.NotImplementedException();
+        if (isFirstState)
+        {
+            if (state is ColyseusRoomState) { 
+                Debug.Log($"Yes: {state}");
+                
+            }
+            // Initial setup based on the initial state
+            Debug.Log("Initial state received.");
+            // For example, you might initialize players or set up room configurations here.
+        }
+        else
+        {
+            // Handle subsequent state updates
+            Debug.Log ("State updated.");
+        }
+    }
+
+    private void _room_OnJoin() {
+        Debug.Log("Joined .");
     }
 
     [ContextMenu("Send Message to the server")]
     void SendMessageToTheServer() {
-        SendToSever();
+        SendToSever("perrosHDP", new { client = _current.sessionId , lol = "EL DIABLO CO" });
     }
 
-    async void SendToSever() {
-        await _room.Send(p_MessageToTheServer, new { x=1.3, y = -1.4 });
+    async void SendToSever(string _type, object message) {
+        await _room.Send(_type, message);
+        //await _room.Send(_type, new { x=1.3, y = -1.4 });
     }
 }
 
+[Serializable]
+public class OnJoinMessage {
+    public ColyseusNetworkedUser newNetworkedUser;
+    public string customLogic;
+}
