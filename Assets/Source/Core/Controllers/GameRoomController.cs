@@ -1,22 +1,18 @@
-﻿
-
-using Assets.Source.Core.Components.Views;
-using Colyseus;
-using System.Collections.Generic;
-using System;
-using UnityEngine;
-using GameDevWare.Serialization;
-using Assets.Source.Core.Views;
+﻿using Colyseus;
 using Colyseus.Schema;
-using System.Runtime.CompilerServices;
+
+using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
-using System.Collections;
+
+using UnityEngine;
+
+using GameDevWare.Serialization;
 
 namespace Assets.Source.Core.Controllers
 {
     public class GameRoomController
     {
-        #region NetworkEvents
         /// <summary>
         ///     OnNetworkEntityAdd delegate for OnNetworkEntityAdd event.
         /// </summary>
@@ -306,362 +302,70 @@ namespace Assets.Source.Core.Controllers
             rooms.Add(roomToAdd);
         }
 
-        /// <summary>
-        ///     Create a room with the given roomId.
-        /// </summary>
-        /// <param name="roomId">The ID for the room.</param>
-        public async Task CreateSpecificRoom(ColyseusClient client, string roomName, string roomId,
-            Action<bool> onComplete = null)
+        public async Task JoinOrCreateRoom(Action<bool> OnComplete = null)
         {
-            Debug.Log($"Creating Room {roomId}");
-
             try
             {
-                //Populate an options dictionary with custom options provided elsewhere as well as the critical option we need here, roomId
-                Dictionary<string, object> options = new Dictionary<string, object> { ["roomId"] = roomId };
-                foreach (KeyValuePair<string, object> option in roomOptionsDictionary)
-                {
-                    options.Add(option.Key, option.Value);
-                }
-
-                _room = await client.Create<ColyseusRoomState>(roomName, options);
+                _room = await _client.JoinOrCreate<ColyseusRoomState>(roomName, roomOptionsDictionary);
             }
             catch (Exception ex)
             {
-                Debug.Log($"Failed to create room {roomId} : {ex.Message}");
-                onComplete?.Invoke(false);
+                Debug.LogError($"Error info: {ex}");
+                OnComplete?.Invoke(false);
                 return;
             }
 
-            onComplete?.Invoke(true);
-            Debug.Log($"Created Room: {roomId}");
-            _lastRoomId = roomId;
+            OnComplete?.Invoke(true);
+            _lastRoomId = _room.RoomId;
+
             RegisterRoomHandlers();
         }
 
-        /// <summary>
-        ///     Join an existing room or create a new one using <see cref="roomName" /> with no options.
-        ///     <para>Locked or private rooms are ignored.</para>
-        /// </summary>
-        public async Task JoinOrCreateRoom(Action<bool> onComplete = null)
-        {
-            Debug.Log($"Join Or Create Room - Name = {roomName}.... ");
-            try
+        public virtual void RegisterRoomHandlers() {
+            _room.OnMessage<string>("welcomeMessage", (_type) =>
             {
-                // Populate an options dictionary with custom options provided elsewhere
-                Dictionary<string, object> options = new Dictionary<string, object>();
-                foreach (KeyValuePair<string, object> option in roomOptionsDictionary)
+
+            });
+
+            _room.OnMessage<OnJoinMessage>("onJoin", (_type) => {
+                _currentNetworkedUser = _type.newNetworkedUser;
+                onJoined?.Invoke(_type.customLogic);
+            });
+
+
+
+            _room.OnJoin += OnJoin;
+            _room.OnStateChange += OnStateChange;
+        }
+
+        public async void SendToSever(string _type, object message)
+        {
+            await _room.Send(_type, message);
+        }
+
+        private void OnStateChange(ColyseusRoomState state, bool isFirstState)
+        {
+            if (isFirstState)
+            {
+                if (state is ColyseusRoomState)
                 {
-                    options.Add(option.Key, option.Value);
+                    Debug.Log($"Yes: {state}");
+
                 }
-
-                _room = await _client.JoinOrCreate<ColyseusRoomState>(roomName, options);
+                // Initial setup based on the initial state
+                Debug.Log("Initial state received.");
+                // For example, you might initialize players or set up room configurations here.
             }
-            catch (Exception ex)
+            else
             {
-                Debug.LogError($"Room Controller Error - {ex.Message + ex.StackTrace}");
-                onComplete?.Invoke(false);
-                return;
-            }
-
-            onComplete?.Invoke(true);
-            Debug.Log($"Joined / Created Room: {_room.Id}");
-            _lastRoomId = _room.Id;
-            RegisterRoomHandlers();
-        }
-
-        public async Task LeaveAllRooms(bool consented, Action onLeave = null)
-        {
-            if (_room != null && rooms.Contains(_room) == false)
-            {
-                await _room.Leave(consented);
-            }
-
-            for (int i = 0; i < rooms.Count; i++)
-            {
-                await rooms[i].Leave(consented);
-            }
-
-            ClearRoomHandlers();
-            onLeave?.Invoke();
-        }
-
-        /// <summary>
-        ///     Asynchronously gets all the available rooms of the <see cref="_client" />
-        ///     named <see cref="roomName" />
-        /// </summary>
-        public async Task<ColyseusRoomAvailable[]> GetRoomListAsync()
-        {
-            ColyseusRoomAvailable[] allRooms = await _client.GetAvailableRooms(roomName);
-
-            return allRooms;
-        }
-
-        public async Task JoinRoomId(string roomId, Action<bool> onJoin = null)
-        {
-            Debug.Log($"Joining Room ID {roomId}....");
-            ClearRoomHandlers();
-
-            try
-            {
-                while (_room == null || !_room.colyseusConnection.IsOpen)
-                {
-                    _room = await _client.JoinById<ColyseusRoomState>(roomId, null);
-
-                    if (_room == null || !_room.colyseusConnection.IsOpen)
-                    {
-                        Debug.LogWarning($"Failed to Connect to {roomId}.. Retrying in 5 Seconds...");
-                        await Task.Delay(5000);
-                    }
-                }
-
-                _lastRoomId = roomId;
-                RegisterRoomHandlers();
-                onJoin?.Invoke(true);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError(ex.Message);
-                onJoin?.Invoke(false);
-                //Debug.LogError("Failed to joining room, try another...");
-                //await CreateSpecificRoom(_client, roomName, roomId, onJoin);
-                //
+                // Handle subsequent state updates
+                Debug.Log("State updated.");
             }
         }
 
-
-
-        public virtual void RegisterRoomHandlers() 
+        private void OnJoin()
         {
-            //StopPing
-            //Start Routing Ping
-            //_Room addOnLeave
-            //_Room AddOnStateChange
-            //_Room OnMessage<OnJoinMessage>
-            //_Room OnMessage<RFCMessage>
-            //_Room OnMessage<PongMessage>
-            //_Room EmptyMessage
-            //_Room OnBeginNewTargetMessage
-            //_Room OnJoinPlayer
-
-            //========================
-            /*_room.State.networkedEntities.OnAdd += OnEntityAdd;
-            _room.State.networkedEntities.OnRemove += OnEntityRemoved;
-
-            _room.State.networkedUsers.OnAdd += OnUserAdd;
-            _room.State.networkedUsers.OnRemove += OnUserRemove;
-
-            _room.State.TriggerAll();*/
-            //========================
-
-            /*_room.colyseusConnection.OnError += Room_OnError;
-            _room.colyseusConnection.OnClose += Room_OnClose;*/
+            Debug.Log("Joined .");
         }
-
-        /// <summary>
-        ///     Unsubscribes <see cref="Room" /> from networked events."/>
-        /// </summary>
-        private void ClearRoomHandlers()
-        {
-            //StopPing();
-
-            if (_room == null)
-            {
-                return;
-            }
-
-            /*_room.State.networkedEntities.OnAdd -= OnEntityAdd;
-            _room.State.networkedEntities.OnRemove -= OnEntityRemoved;
-            _room.State.networkedUsers.OnAdd -= OnUserAdd;
-            _room.State.networkedUsers.OnRemove -= OnUserRemove;
-
-            _room.colyseusConnection.OnError -= Room_OnError;
-            _room.colyseusConnection.OnClose -= Room_OnClose;
-
-            _room.OnStateChange -= OnStateChangeHandler;
-
-            _room.OnLeave -= OnLeaveRoom;*/
-
-            _room = null;
-            _currentNetworkedUser = null;
-        }
-
-        /// <summary>
-        ///     The callback for the event when a <see cref="ColyseusNetworkedEntity" /> is added to a room.
-        /// </summary>
-        /// <param name="entity">The entity that was just added.</param>
-        /// <param name="key">The entity's key</param>
-        private async void OnEntityAdd(string key, ColyseusNetworkedEntity entity)
-        {
-            onAddNetworkEntity?.Invoke(entity);
-        }
-
-        /// <summary>
-        ///     The callback for the event when a <see cref="ColyseusNetworkedEntity" /> is removed from a room.
-        /// </summary>
-        /// <param name="entity">The entity that was just removed.</param>
-        /// <param name="key">The entity's key</param>
-        private void OnEntityRemoved(string key, ColyseusNetworkedEntity entity)
-        {
-            if (_entities.ContainsKey(entity.id))
-            {
-                _entities.Remove(entity.id);
-            }
-
-            ColyseusNetworkedEntityView view = null;
-
-            if (_entityViews.ContainsKey(entity.id))
-            {
-                view = _entityViews[entity.id];
-                _entityViews.Remove(entity.id);
-            }
-
-            onRemoveNetworkEntity?.Invoke(entity, view);
-        }
-
-        /// <summary>
-        ///     Callback for when a <see cref="ColyseusNetworkedUser" /> is added to a room.
-        /// </summary>
-        /// <param name="user">The user object</param>
-        /// <param name="key">The user key</param>
-        private void OnUserAdd(string key, ColyseusNetworkedUser user)
-        {
-            // Add "player" to map of players
-            _users.Add(key, user);
-
-            // On entity update...
-            /*user.OnChange += changes =>
-            {
-                
-            };*/
-        }
-
-        // <summary>
-        ///     Callback for when a user is removed from a room.
-        /// </summary>
-        /// <param name="user">The removed user.</param>
-        /// <param name="key">The user key.</param>
-        private void OnUserRemove(string key, ColyseusNetworkedUser user)
-        {
-
-            _users.Remove(key);
-        }
-
-        /// <summary>
-        ///     Callback for when the room's connection closes.
-        /// </summary>
-        /// <param name="closeCode">Code reason for the connection close.</param>
-        private static void Room_OnClose(int closeCode)
-        {
-            
-        }
-
-        /// <summary>
-        ///     Callback for when the room get an error.
-        /// </summary>
-        /// <param name="errorMsg">The error message.</param>
-        private static void Room_OnError(string errorMsg)
-        {
-            
-        }
-
-        private static void OnStateChangeHandler(ColyseusRoomState state, bool isFirstState)
-        {
-            //LSLog.LogImportant("State has been updated!");
-            onRoomStateChanged?.Invoke(state.attributes);
-        }
-
-        /// <summary>
-        ///     Sends "ping" message to current room to help measure latency to the server.
-        /// </summary>
-        /// <param name="roomToPing">The <see cref="ColyseusRoom{T}" /> to ping.</param>
-        private IEnumerator RunPingThread(object roomToPing)
-        {
-            ColyseusRoom<ColyseusRoomState> currentRoom = (ColyseusRoom<ColyseusRoomState>)roomToPing;
-
-            const float pingInterval = 0.5f; // seconds
-            const float pingTimeout = 15f; //seconds
-
-            int timeoutMilliseconds = Mathf.FloorToInt(pingTimeout * 1000);
-            DateTime pingStart;
-            while (currentRoom != null)
-            {
-                _waitForPong = true;
-                pingStart = DateTime.Now;
-                _lastPing = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                _ = currentRoom.Send("ping");
-                while (currentRoom != null && _waitForPong &&
-                       DateTime.Now.Subtract(pingStart).TotalSeconds < timeoutMilliseconds)
-                {
-                    yield return new WaitForSeconds(0.02f);//Thread.Sleep(200));
-                }
-
-                if (_waitForPong)
-                {
-                    Debug.Log("Ping Timed out");
-                }
-                yield return new WaitForSeconds(pingInterval);
-            }
-        }
-
-        /// <summary>
-        ///     Increments the known <see cref="_serverTime" /> by <see cref="Time.fixedDeltaTime" />
-        ///     converted into milliseconds.
-        /// </summary>
-        public void IncrementServerTime()
-        {
-            _serverTime += Time.fixedDeltaTime * 1000;
-        }
-
-        private void StopPing()
-        {
-            if (_pingThread != null)
-            {
-                MyMultiplayerManager.Instance.StopCoroutine(_pingThread);
-                _pingThread = null;
-            }
-        }
-
-        public async void CleanUp()
-        {
-            StopPing();
-
-            List<Task> leaveRoomTasks = new List<Task>();
-
-            foreach (IColyseusRoom roomEl in rooms)
-            {
-                leaveRoomTasks.Add(roomEl.Leave(false));
-            }
-
-            if (_room != null)
-            {
-                leaveRoomTasks.Add(_room.Leave(false));
-            }
-
-            await Task.WhenAll(leaveRoomTasks.ToArray());
-
-            ClearCollectionsAndUser();
-        }
-
-        public void ClearCollectionsAndUser()
-        {
-            if (_entities != null)
-                _entities.Clear();
-
-            if (_entityViews != null)
-                _entityViews.Clear();
-
-            if (_users != null)
-                _users.Clear();
-
-            if (_creationCallbacks != null)
-                _creationCallbacks.Clear();
-
-            if (roomOptionsDictionary != null)
-                roomOptionsDictionary.Clear();
-
-            _currentNetworkedUser = null;
-        }
-        #endregion
     }
 }

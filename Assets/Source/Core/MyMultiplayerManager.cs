@@ -1,33 +1,43 @@
 using UnityEngine;
+
 using Colyseus;
 
 using Assets.Source.Core.Components.Lobby;
 using Assets.Source.Core.Controllers;
+
 using System;
 using System.Collections.Generic;
-using System.Runtime.InteropServices;
+
+using Assets.Source.Core;
 public class MyMultiplayerManager : ColyseusManager<MyMultiplayerManager>
 {
     public delegate void OnRoomsReceived(GameRoomsAvailables[] rooms);
     public static OnRoomsReceived onRoomsReceived;
-
-    [SerializeField]
-    protected GameRoomController _roomController;
-
+    public GameNetworkedEntityFactory _networkedEntityFactory;
     /// <summary>
     ///     Returns a reference to the current networked user.
     /// </summary>
     public ColyseusNetworkedEntity CurrentNetworkedEntity;
 
+
     [SerializeField]
-    string p_MessageToTheServer;
+    protected GameRoomController _roomController;
+    private ColyseusRoom<ColyseusRoomState> _room;
 
-    ColyseusRoom<ColyseusRoomState> _room;
+    [SerializeField]
+    private string p_MessageToTheServer;
 
+    private bool _isInitialized = false;
 
     protected override void Awake()
     {
         base.Awake();
+
+        var _options = new Dictionary<string, object>();
+        _options.Add("roomId", 123);
+        _options.Add("logic", "starBossCoop");
+
+        Initialize(_options, "Main_Room");
         InitializeClient();
     }
 
@@ -44,75 +54,38 @@ public class MyMultiplayerManager : ColyseusManager<MyMultiplayerManager>
     public override void InitializeClient()
     {
         base.InitializeClient();
-        Debug.Log($"Server: {client}");
-
-        JoinOCreateRoom();
+        
+        if (_isInitialized) {
+            return;
+        }
+        _roomController.SetClient(client);
+        
+        //JoinOCreateRoom();
     }
 
-    ColyseusNetworkedUser _current;
-
-    public async void JoinOCreateRoom() {
-        Dictionary<string, object> options = new Dictionary<string, object>();
-        options.Add("roomId", 123);
-        options.Add("logic", "starBossCoop");
-        //options.Add(option.Key, option.Value);
-
-
-        _room = await client.JoinOrCreate<ColyseusRoomState>("Main_Room", options);
-
-        _room.OnMessage<string>("welcomeMessage", (_type) =>
-        {
-            Debug.Log("Received message from server: " + _type);
-        });
-
-        _room.OnMessage<OnJoinMessage>("onJoin", (_type) => {
-            _current = _type.newNetworkedUser;
-            Debug.Log("Received On Join message from server: "+ _type.newNetworkedUser.sessionId + " - " + _type.newNetworkedUser.connected);
-        });
-
-
-
-        _room.OnJoin += _room_OnJoin;
-        _room.OnStateChange += _room_OnStateChange;
-    }
-
-
-    private void _room_OnStateChange(ColyseusRoomState state, bool isFirstState)
+    public void Initialize(Dictionary<string, object> _options, string _roomName) 
     {
-        if (isFirstState)
+        if (_isInitialized)
         {
-            if (state is ColyseusRoomState) { 
-                Debug.Log($"Yes: {state}");
-                
-            }
-            // Initial setup based on the initial state
-            Debug.Log("Initial state received.");
-            // For example, you might initialize players or set up room configurations here.
+            return;
         }
-        else
-        {
-            // Handle subsequent state updates
-            Debug.Log ("State updated.");
-        }
+
+        _roomController = new GameRoomController() { roomName = _roomName };
+        _roomController.SetRoomOptions(_options);
+        _roomController.SetDependencies(_colyseusSettings);
+
+        _networkedEntityFactory = new GameNetworkedEntityFactory(_roomController.CreationCallbacks,
+            _roomController.Entities, _roomController.EntityViews);
     }
 
-    private void _room_OnJoin() {
-        Debug.Log("Joined .");
+    public async void JoinOrCreateRoom() { 
+        await _roomController.JoinOrCreateRoom();
     }
 
     [ContextMenu("Send Message to the server")]
     void SendMessageToTheServer() {
-        SendToSever("perrosHDP", new { client = _current.sessionId , lol = "EL DIABLO CO" });
+        _roomController.SendToSever("perrosHDP", new { lol = "EL DIABLO CO" });
     }
 
-    async void SendToSever(string _type, object message) {
-        await _room.Send(_type, message);
-        //await _room.Send(_type, new { x=1.3, y = -1.4 });
-    }
-}
-
-[Serializable]
-public class OnJoinMessage {
-    public ColyseusNetworkedUser newNetworkedUser;
-    public string customLogic;
+    
 }

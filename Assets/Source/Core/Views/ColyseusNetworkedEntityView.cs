@@ -1,9 +1,6 @@
 ﻿
-
-namespace Assets.Source.Core.Components.Views
+public  class ColyseusNetworkedEntityView
 {
-    public  class ColyseusNetworkedEntityView
-    {
-        public string Id { get; protected set; }
-    }
+    public string Id { get; protected set; }
 }
+

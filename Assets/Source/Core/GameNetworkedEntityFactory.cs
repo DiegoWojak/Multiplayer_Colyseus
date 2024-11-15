@@ -1,11 +1,9 @@
-﻿using Assets.Source.Core.Components.Views;
-using Assets.Source.Core.Views;
+﻿
 using GameDevWare.Serialization;
+
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+
 
 namespace Assets.Source.Core
 {
@@ -18,5 +16,12 @@ namespace Assets.Source.Core
         // TODO: replace GameDevWare stuff
         private readonly IndexedDictionary<string, ColyseusNetworkedEntity> _entities;
         private readonly IndexedDictionary<string, GameNetworkedEntityView> _entityViews;
+
+        public GameNetworkedEntityFactory(Dictionary<string, Action<ColyseusNetworkedEntity>> creationCallbacks, IndexedDictionary<string, ColyseusNetworkedEntity> entities, IndexedDictionary<string, GameNetworkedEntityView> entityViews)
+        {
+            _creationCallbacks = creationCallbacks;
+            _entities = entities;
+            _entityViews = entityViews;
+        }
     }
 }
