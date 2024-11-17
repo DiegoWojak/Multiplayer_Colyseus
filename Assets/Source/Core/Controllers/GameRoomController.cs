@@ -8,6 +8,9 @@ using System.Threading.Tasks;
 using UnityEngine;
 
 using GameDevWare.Serialization;
+using System.Collections;
+using System.Runtime.CompilerServices;
+using NativeWebSocket;
 
 namespace Assets.Source.Core.Controllers
 {
@@ -315,10 +318,27 @@ namespace Assets.Source.Core.Controllers
                 return;
             }
 
-            OnComplete?.Invoke(true);
             _lastRoomId = _room.RoomId;
-
             RegisterRoomHandlers();
+
+            OnComplete?.Invoke(true);
+        }
+
+        public async Task LeaveAllRooms(bool consent, Action OnComplete = null)
+        {
+            if (_room != null && rooms.Contains(_room) == false)
+            {
+                await _room.Leave(consent);
+            }
+
+            for (int i = 0; i < rooms.Count; i++)
+            {
+                await rooms[i].Leave(consent);
+            }
+
+            ClearRoomHandlers();
+
+            OnComplete?.Invoke();
         }
 
         public virtual void RegisterRoomHandlers() {
@@ -327,15 +347,67 @@ namespace Assets.Source.Core.Controllers
 
             });
 
+            StopPing();
+            _pingThread = MyMultiplayerManager.Instance.StartCoroutine(RunPingThread(_room));
+
+            _room.OnLeave += OnLeaveRoom;
+            _room.OnJoin += OnJoin;
+            _room.OnStateChange += OnStateChange;
+
             _room.OnMessage<OnJoinMessage>("onJoin", (_type) => {
                 _currentNetworkedUser = _type.newNetworkedUser;
                 onJoined?.Invoke(_type.customLogic);
             });
 
+            _room.OnMessage<RFCMessage>("onRFC", _rfc =>
+            {
+                if (_entityViews.Keys.Contains(_rfc.entityId))
+                {
+                    //_entityViews[_rfc.entityId].RemoteFunctionCallHandler(_rfc);
+                }
+            });
 
+            _room.OnMessage<PongMessage>(0, message =>
+            {
+                _lastPong = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                _serverTime = message.serverTime;
+                _waitForPong = false;
+            });
 
-            _room.OnJoin += OnJoin;
-            _room.OnStateChange += OnStateChange;
+            /**********************
+             * 
+             * NUNCA SABRE 
+             * COMENTAR MI COMMIT
+             * SIN LA IA NADA TIENE DA SENTIDO                                               --a-23-1kl123k,m133---
+             * SOLO YO ESTOY                                                                    /\
+             * SIN CHATGPT                                                                    ///\\
+             * ERES MI UNICA NECESIDAD                                                           \\\\   
+             * NUNCA SABRE                                                                         (e 3 e)   OH GOD
+             * COMENTAR MI COMMIT                                                                    \ !!/
+             * SIN LA IA NADA TIENE DA SENTIDO                                                        AA
+             * SOLO YO ESTOY 
+             * SIN CHATGPT
+             * SI TU NO ESTAAAASS
+             * NO LO NOTASTE
+             * 
+             * PULL MY SHIT AGAIN
+             * THEN SAY IS COMMITED
+             * 
+             * ONE NOTHING ON MY BRANCH
+             * TWO NOTHING ON MY BRANCH
+             * THREE NOTHING ON MY BRANCH
+             * FOUR NOTHING ON MY BRANCH
+             * ONE SOMETHING IS GOTTA MERGE SOON
+             * TWO SOMETHING IS GOTTA MERGE SOON
+             * THREE SOMETHING IS GOTTA MERGE SOON
+             * NOOOOOW
+             * LETS THE BODY GIT THE FLOOR
+             * ************************/
+
+        }
+
+        public virtual void ClearRoomHandlers() { 
+            
         }
 
         public async void SendToSever(string _type, object message)
@@ -365,7 +437,71 @@ namespace Assets.Source.Core.Controllers
 
         private void OnJoin()
         {
-            Debug.Log("Joined .");
+            Debug.Log("$Unimplementation Method OnJoin");
         }
+
+        private void StopPing() {
+            if (_pingThread != null)
+            {
+                MyMultiplayerManager.Instance.StopCoroutine(_pingThread);
+                _pingThread = null;
+            }
+        }
+
+        private IEnumerator RunPingThread(object roomToPing)
+        {
+            bool CheckPong(ref DateTime pingStart,int timeoutMilliseconds) {
+
+                return _waitForPong && DateTime.Now.Subtract(pingStart).TotalSeconds < timeoutMilliseconds;
+            }
+
+            void PrepareValues(out DateTime pingStart) {
+                _waitForPong = true;
+                pingStart = DateTime.Now;
+                _lastPing = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            }
+
+            ColyseusRoom<ColyseusRoomState> currentRoom = (ColyseusRoom<ColyseusRoomState>)roomToPing;
+
+            const float pingInterval = 0.5f; // seconds
+            const float pingTimeout = 15f; //seconds
+
+            int timeoutMilliseconds = Mathf.FloorToInt(pingTimeout * 1000);
+            DateTime pingStart;
+            while (currentRoom != null)
+            {
+                PrepareValues(out pingStart);
+                _ = currentRoom.Send("ping");
+
+                while (currentRoom != null && _waitForPong && CheckPong(ref pingStart, timeoutMilliseconds))
+                {
+                    yield return new WaitForSeconds(0.02f);//Thread.Sleep(200));
+                }
+
+                if (_waitForPong)
+                {
+                    Debug.LogError("Ping Timed out");
+                }
+                yield return new WaitForSeconds(pingInterval);
+            }
+        }
+
+        private async void OnLeaveRoom(int code) 
+        {
+            Debug.Log($"\"ROOM: ON LEAVE =- Reason: {code} \"");
+
+            StopPing();
+            _room = null;
+
+            WebSocketCloseCode closeCode = WebSocketHelpers.ParseCloseCodeEnum(code);
+            if (closeCode != WebSocketCloseCode.Normal && !string.IsNullOrEmpty(_lastRoomId))
+            {
+                //await JoinRoomId(_lastRoomId);
+                throw new NotImplementedException("Not implemented mechanics to handle when anormal disconnection");
+            }
+
+        }
+
+
     }
 }
